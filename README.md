@@ -3,7 +3,7 @@ A modified piferre script that is compatible with the desi MWS pipeline integrat
 
 Currently the differences between this script and the original piferre script (https://github.com/callendeprieto/piferre) are:
 
-(1) The users can specify which spectra-64 fit file to be processed rather than process the whol spectra-64 folder instead.
+(1) The users can specify which spectra-64 fit file to be processed rather than process the whole spectra-64 folder instead.
 
 (2) The users can specify where to dump the output files (--output_dir) and all the scripts and parameter files (--output_script_dir)
 
