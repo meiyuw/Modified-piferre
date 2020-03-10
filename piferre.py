@@ -55,7 +55,7 @@ def lambda_synth(synthfile):
     return x
 
 #create a slurm script for a given pixel
-def write_slurm(sdir,pixel,output_path,nthreads=1,script_path=None,ngrids=None, suffix=''):
+def write_slurm(sdir,pixel,output_path,n_fiber,nthreads=1,script_path=None,ngrids=None, suffix=''):
     ferre=os.environ['DESI_MWS_root']+"/ferre/src/a.out"
     python_path=os.environ['DESI_MWS_root']+"/piferre"
     try:   
@@ -67,14 +67,29 @@ def write_slurm(sdir,pixel,output_path,nthreads=1,script_path=None,ngrids=None, 
     if script_path is None: path='.'
     if ngrids is None: ngrids=1
 
+    # Calculating the required runtime. For 300 fibers it takes about 20 mins.
+    # Each run request at least 20 min.
+    runtime=20.0*60.0*np.ceil(n_fiber/300.0) # in second.
+    rt_5m=np.ceil(runtime/(5.0*60.0))
+    rt_hr=int(rt_5m//12)
+    if(rt_hr != 0):
+        rt_min=int((rt_5m%12)*5)
+    else:
+        if ((rt_5m%12)*5 > 20.0):
+            rt_min=int((rt_5m%12)*5)
+        else:
+            rt_min=20
+
     f=open(os.path.join(script_path,sdir,pixel,pixel+suffix+'.slurm'),'w')
     f.write("#!/bin/bash \n")
     f.write("#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-# \n")
     f.write("#This script was written by piferre.py on "+now+" \n") 
     if host[:4] == 'cori':
       f.write("#SBATCH --qos=regular" + "\n")
+      f.write("#SBATCH  -o "+str(pixel)+"_%j.out"+" \n")
+      f.write("#SBATCH  -e "+str(pixel)+"_%j.err"+" \n")      
       f.write("#SBATCH --constraint=haswell" + "\n") 
-      f.write("#SBATCH --time=20"+"\n") #minutes
+      f.write("#SBATCH --time="+str(rt_hr)+":"+str(100+rt_min)[1:]+":00 \n")
       f.write("#SBATCH --ntasks=1" + "\n")
       f.write("#SBATCH --cpus-per-task="+str(nthreads*2)+"\n")
     else:
@@ -176,7 +191,7 @@ def readzbest(filename):
   hdu=fits.open(filename)
   if len(hdu) > 1:
     enames=extnames(hdu)
-    print(enames)
+    #print(enames)
     if 'ZBEST' in enames:
       zbest=hdu['zbest'].data
       targetid=zbest['targetid'] #array of long integers
@@ -190,8 +205,8 @@ def readzbest(filename):
         targetid.append(str(plate[i])+'-'+str(mjd[i])+'-'+str(fiberid[i]))
       targetid=array(targetid)  #array of strings
 
-    print(type(targetid),type(zbest['z']),type(targetid[0]))
-    print(targetid.shape,zbest['z'].shape)
+    #print(type(targetid),type(zbest['z']),type(targetid[0]))
+    #print(targetid.shape,zbest['z'].shape)
     z=dict(zip(targetid, zbest['z']))
   else:
     z=dict()
@@ -365,7 +380,7 @@ def write_tab_fits(pixel, script_path,path=None):
   #hdu.header['EXTNAME']= ('SPTAB', 'Stellar Parameter Table')
   i = 0
   for entry in colcomm.keys():
-    print(entry) 
+    #print(entry) 
     hdu.header['TCOMM'+str(i+1)] = colcomm[entry]
     i+=1
   hdulist.append(hdu)
@@ -420,7 +435,7 @@ def write_mod_fits(pixel, script_path,path=None):
   if (len(n) > 0 & len(odata) > 0):     
     f=glob.glob(root+".frd")
     fdata=loadtxt(f[0])
-    print('data shape:',edata.shape,fdata.shape,odata.shape)
+    #print('data shape:',edata.shape,fdata.shape,odata.shape)
     edata=edata/fdata*odata
   else:
     odata=loadtxt(root+".frd")  
@@ -437,7 +452,7 @@ def write_mod_fits(pixel, script_path,path=None):
 
   for entry in band:
     j2 = j1 + npix[i] 
-    print(entry,i,npix[i],j1,j2)
+    #print(entry,i,npix[i],j1,j2)
     #colx = fits.Column(name='wavelength',format='e8', array=array(x[j1:j2]))
     #coldefs = fits.ColDefs([colx])
     #hdu = fits.BinTableHDU.from_columns(coldefs)
@@ -596,7 +611,7 @@ def opfmerge(pixel,path=None,wait_on_sorted=False):
     array=line.split()
     min_chi=float(array[ilchi[0]])
     min_oline=line
-    print(min_chi,min_oline)
+    #print(min_chi,min_oline)
     min_mline=mf[0].readline()
     if len(n) > 0: min_nline=nf[0].readline()
     for i in range(len(o)-1):
@@ -663,10 +678,10 @@ def finddatafiles(path,pixel,sdir='',rvpath=None):
 				for ff2 in extrafiles2:
 					infiles.append(os.path.join(ff,ff2))
 	infiles.sort()
-	print('infiles=',infiles)
+	#print('infiles=',infiles)
 	
 	for filename in infiles:
-  		print('filename=',filename)
+  		#print('filename=',filename)
   		# DESI sims/data
   		if (filename.find('spectra-64') > -1 and filename.find('.fits') > -1):
   			datafiles.append(os.path.join(path,sdir,pixel,filename))
@@ -724,203 +739,208 @@ def packfits(input="*.fits",output="output.fits"):
 
 #process a single pixel
 def do(path,out_path,out_script_path,pixel,expid_range,sdir='',truth=None,nthreads=1,rvpath=None,mwonly=False):
-	#get input data files
-	datafiles,zbestfiles  = finddatafiles(path,pixel,sdir,rvpath=rvpath)
-	if (datafiles == None or zbestfiles == None): return None
+    #get input data files
+    datafiles,zbestfiles  = finddatafiles(path,pixel,sdir,rvpath=rvpath)
+    if (datafiles == None or zbestfiles == None): return None
 	
-	#loop over possible multiple data files in the same pixel
-	for i in range(len(datafiles)):
-		datafile=datafiles[i]
-		zbestfile=zbestfiles[i]
+    #loop over possible multiple data files in the same pixel
+    for i in range(len(datafiles)):
+        datafile=datafiles[i]
+        zbestfile=zbestfiles[i]
 	
-	#get redshifts
-	if zbestfile.find('best') > -1:
-		z=readzbest(zbestfile)
-	else:
-		#Koposov pipeline
-		z=readk(zbestfile)
+    #get redshifts
+    if zbestfile.find('best') > -1:
+        z=readzbest(zbestfile)
+    else:
+        #Koposov pipeline
+        z=readk(zbestfile)
 	
-	#read primary header and
-	#find out if there is FIBERMAP extension
-	#identify MWS targets
-	hdu=fits.open(datafile)
-	enames=extnames(hdu)
-	pheader=hdu['PRIMARY'].header
-	print('datafile='+datafile)
-	print('extensions=',enames)
+    #read primary header and
+    #find out if there is FIBERMAP extension
+    #identify MWS targets
+    hdu=fits.open(datafile)
+    enames=extnames(hdu)
+    pheader=hdu['PRIMARY'].header
+    #print('datafile='+datafile)
+    #print('extensions=',enames)
 	
-	if 'FIBERMAP' in enames: #DESI data
-		fibermap=hdu['FIBERMAP']
-		suffix=''
-		targetid=fibermap.data['TARGETID']
-		if 'RA_TARGET' in fibermap.data.names:
-			ra=fibermap.data['RA_TARGET']
-		else:
-			if 'TARGET_RA' in fibermap.data.names:
-				ra=fibermap.data['TARGET_RA']
-			else:
-				ra=-9999.*ones(len(targetid))
-		if 'DEC_TARGET' in fibermap.data.names:
-			dec=fibermap.data['DEC_TARGET']
-		else:
-			if 'TARGET_DEC' in fibermap.data.names:
-				dec=fibermap.data['TARGET_DEC']
-			else:
-				dec=-9999.*ones(len(targetid))
-		if 'MAG' in fibermap.data.names:
-			mag=fibermap.data['MAG']
-		else:
-			mag=[-9999.*ones(5)]
-			for kk in range(len(targetid)-1): mag.append(-9999.*ones(5))
-		nspec=ra.size
+    if 'FIBERMAP' in enames: #DESI data
+        fibermap=hdu['FIBERMAP']
+        suffix=''
+        targetid=fibermap.data['TARGETID']
+        if 'RA_TARGET' in fibermap.data.names:
+            ra=fibermap.data['RA_TARGET']
+        else:
+            if 'TARGET_RA' in fibermap.data.names:
+                ra=fibermap.data['TARGET_RA']
+            else:
+                ra=-9999.*ones(len(targetid))
+        if 'DEC_TARGET' in fibermap.data.names:
+            dec=fibermap.data['DEC_TARGET']
+        else:
+            if 'TARGET_DEC' in fibermap.data.names:
+                dec=fibermap.data['TARGET_DEC']
+            else:
+                dec=-9999.*ones(len(targetid))
+        if 'MAG' in fibermap.data.names:
+            mag=fibermap.data['MAG']
+        else:
+            mag=[-9999.*ones(5)]
+            for kk in range(len(targetid)-1): mag.append(-9999.*ones(5))
+        nspec=ra.size
 		
-		#set the set of grids to be used
-		grids=[]
-		for item in range(9): grids.append('n_rdesi'+str(item+1))
-		#for item in range(10): grids.append('n_rdesi'+str(item+1))
-		print('grids=',grids)
-		maxorder=[3,3,3,2,1,3,3,3,3] #max. order that can be used for interpolations
-		#bands=['b']
-		bands=['b','r','z']
-	else:  #SDSS/BOSS data
-		plate=pheader['PLATEID']
-		mjd=pheader['MJD']
-		suffix="-"+str(mjd)
-		#fibermap=hdu['PLUGMAP']
-		fibermap=hdu[5]
-		fiberid=fibermap.data['fiberid']
-		ra=fibermap.data['RA']
-		dec=fibermap.data['DEC']
-		#mag=zeros((ra.size,5)) # used zeros for LAMOST fibermap.data['MAG']
-		mag=fibermap.data['MAG']
-		nspec=ra.size
-		targetid=[]
-		for i in range(nspec):
-			targetid.append(str(plate)+'-'+str(mjd)+'-'+str(fiberid[i]))
-		targetid=array(targetid)
-		
-		#set the set of grids to be used
-		#SDSS/BOSS
-		grids=[]
-		for item in range(9): grids.append('n_rboss'+str(item+1))
-		print(grids)
-		maxorder=[3,3,3,2,1,3,3,3,3] #max. order that can be used for interpolations
-		bands=['']
-		#LAMOST
-		#grids=['n_crump3hL']
-		#maxorder=[3]
-		#bands=['']
-	#identify MWS targets:
+	#set the set of grids to be used
+        grids=[]
+        for item in range(9): grids.append('n_rdesi'+str(item+1))
+        #for item in range(10): grids.append('n_rdesi'+str(item+1))
+        #print('grids=',grids)
+        maxorder=[3,3,3,2,1,3,3,3,3] #max. order that can be used for interpolations
+        #bands=['b']
+        bands=['b','r','z']
+    else:  #SDSS/BOSS data
+        plate=pheader['PLATEID']
+        mjd=pheader['MJD']
+        suffix="-"+str(mjd)
+        #fibermap=hdu['PLUGMAP']
+        fibermap=hdu[5]
+        fiberid=fibermap.data['fiberid']
+        ra=fibermap.data['RA']
+        dec=fibermap.data['DEC']
+        #mag=zeros((ra.size,5)) # used zeros for LAMOST fibermap.data['MAG']
+        mag=fibermap.data['MAG']
+        nspec=ra.size
+        targetid=[]
+        for i in range(nspec):
+            targetid.append(str(plate)+'-'+str(mjd)+'-'+str(fiberid[i]))
+
+        targetid=array(targetid)
+
+        #set the set of grids to be used
+        #SDSS/BOSS
+        grids=[]
+        for item in range(9): grids.append('n_rboss'+str(item+1))
+	#print(grids)
+        maxorder=[3,3,3,2,1,3,3,3,3] #max. order that can be used for interpolations
+        bands=['']
+        #LAMOST
+        #grids=['n_crump3hL']
+        #maxorder=[3]
+        #bands=['']
+
+    #identify MWS targets:
 			
-	if mwonly:
-		process_target = fibermap.data['MWS_TARGET'] != 0
-		#identify targets to process based on redshift: 0.00<|z|<0.01
-	
-		#for i in range(nspec):
-		#	if z.get(targetid[i],-1) != -1:
-		#		if (abs(z[targetid[i]]) < 0.01) & (abs(z[targetid[i]]) > 0.): process_target[i]= True		
-				
-		process_target = process_target & (fibermap.data["EXPID"] > expid_range[0]) & (fibermap.data['EXPID'] <= expid_range[1])
-	else:
-		#process_target = ones(nspec, dtype=bool)
-		process_target = (fibermap.data["EXPID"] > expid_range[0]) & (fibermap.data['EXPID'] <= expid_range[1])
+    if mwonly:
+        process_target = fibermap.data['MWS_TARGET'] != 0
+        #identify targets to process based on redshift: 0.00<|z|<0.01
+        #for i in range(nspec):
+        #	if z.get(targetid[i],-1) != -1:
+        #		if (abs(z[targetid[i]]) < 0.01) & (abs(z[targetid[i]]) > 0.): process_target[i]= True
+        process_target = process_target & (fibermap.data["EXPID"] > expid_range[0]) & (fibermap.data['EXPID'] <= expid_range[1])
+    else:
+        #process_target = ones(nspec, dtype=bool)
+        process_target = (fibermap.data["EXPID"] > expid_range[0]) & (fibermap.data['EXPID'] <= expid_range[1])
 
 	
-	print('# of processing targets=',np.sum(process_target),'out of ',len(process_target))	
-	#skip the rest of the code if there are no targets
-	if (process_target.nonzero()[0].size == 0): return None
+    print('# of processing targets=',np.sum(process_target),'out of ',len(process_target))	
+    #skip the rest of the code if there are no targets
+    if (process_target.nonzero()[0].size == 0): return None
 	
-	#set ids array (with targetids) and par dictionary for vrd/ipf file
-	ids=[]
-	par={}
+    #set ids array (with targetids) and par dictionary for vrd/ipf file
+    ids=[]
+    par={}
 	
-	#truth (optional, for simulations)
-	#if (len(sys.argv) == 3):
-	npass=0 #count targets that pass the filter (process_target)
-	if truth is not None:
-		(true_feh,true_teff,true_logg,true_rmag,true_z)=truth
-		for k in range(nspec):
-			if process_target[k]:
-				npass=npass+1
-				id=str(targetid[k])
-				ids.append(id)
-				par[id]=[true_feh[targetid[k]],true_teff[targetid[k]],
-					true_logg[targetid[k]],true_rmag[targetid[k]],
-					true_z[targetid[k]],z[targetid[k]],ra[k],dec[k]]
-	else:
-		for k in range(nspec):
-			if process_target[k]:
-				npass=npass+1
-				id=str(targetid[k])
-				ids.append(id)
-				#we patch the redshift here to handle missing redshifts for comm. data from Sergey
-				#z[targetid[k]]=0.0
-				par[id]=[0.0,0.0,0.0,mag[k][2],0.0,z[targetid[k]],ra[k],dec[k]]
-	
-	#collect data for each band
-	for j in range(len(bands)):
-		if bands[j] == '':
-			gridfile=os.environ['GRID_DIR']+"/grids/"+grids[0]+'.dat'
-		else:
-			gridfile=os.environ['GRID_DIR']+"/grids/"+grids[0]+'-'+bands[j]+'.dat'
-		#read grid wavelength array
-		x1=lambda_synth(gridfile)
-		#read DESI data, select targets, and resample
-		(x,y,ivar,r)=readspec(datafile,bands[j])
-		ey=sqrt(divide(1.,ivar,where=(ivar != 0.)))
-		ey[where(ivar == 0.)]=max(y)*1e3
-		nspec, freq = y.shape
-		#print('nspec=',nspec)
-		#print('n(process_target)=',process_target.nonzero()[0].size)
-		y2=zeros((npass,len(x1)))
-		ey2=zeros((npass,len(x1)))
-		k2=0
-		#print('nspec,len(z),npass,len(x1)=',nspec,len(z),npass,len(x1))
-		for k in range(nspec):
-			if process_target[k]:
-				y2[k2,:]=interp(x1,x*(1.-z[targetid[k]]),y[k,:])
-				ey2[k2,:]=interp(x1,x*(1-z[targetid[k]]),ey[k,:])
-				k2=k2+1
-		
-		if (j==0):
-			xx=x1
-			yy=y2
-			eyy=ey2
-		else:
-			xx=concatenate((xx,x1))
-			yy=concatenate((yy,y2),axis=1)
-			eyy=concatenate((eyy,ey2),axis=1)
-		
-		savetxt(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'-'+bands[j]+'.wav',x1,fmt='%14.5e')
+    #truth (optional, for simulations)
+    #if (len(sys.argv) == 3):
+    npass=0 #count targets that pass the filter (process_target)
+    if truth is not None:
+        (true_feh,true_teff,true_logg,true_rmag,true_z)=truth
+        for k in range(nspec):
+            if process_target[k]:
+                npass=npass+1
+                id=str(targetid[k])
+                ids.append(id)
+                par[id]=[true_feh[targetid[k]],true_teff[targetid[k]],
+                         true_logg[targetid[k]],true_rmag[targetid[k]],
+                         true_z[targetid[k]],z[targetid[k]],ra[k],dec[k]]
+    else:
+        for k in range(nspec):
+            if process_target[k]:
+                npass=npass+1
+                id=str(targetid[k])
+                ids.append(id)
+                #we patch the redshift here to handle missing redshifts for comm. data from Sergey
+                #z[targetid[k]]=0.0
+                par[id]=[0.0,0.0,0.0,mag[k][2],0.0,z[targetid[k]],ra[k],dec[k]]
 
-	savetxt(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'.wav',xx,fmt='%14.5e')
-	fmp = tbl.Table(fibermap.data) [process_target]
-	hdu0 = fits.BinTableHDU(fmp)
-	hdu0.writeto(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'.fmp.fits',overwrite=True)
-	write_ferre_input(out_script_path,pixel,ids,par,yy,eyy,path=os.path.join(sdir,pixel),suffix=suffix)
-	#write slurm script
-	write_slurm(sdir,pixel,out_path,script_path=out_script_path,ngrids=len(grids),nthreads=nthreads, suffix=suffix)
-	#loop over all grids
-	for k in range(len(grids)):
-		#make an array with the names of the synthfiles
-		synthfiles=[]
-		for j in range(len(bands)):
-			if bands[j] == '':
-				gridfile=os.environ['GRID_DIR']+"/grids/"+grids[k]+'.dat'
-			else:
-				gridfile=os.environ['GRID_DIR']+"/grids/"+grids[k]+'-'+bands[j]+'.dat'
-			synthfiles.append(gridfile)
-		#prepare ferre control file
-		nml=mknml(synthfiles,pixel+suffix,k,maxorder[k],nthreads=nthreads)
-		writenml(nml,nmlfile='input.nml'+suffix+'_'+str(k),path=os.path.join(out_script_path,sdir,pixel))
-		writenml(nml,path=os.path.join(out_script_path,sdir,pixel))
-		print(k)
-		print(nml)
+    #collect data for each band
+    for j in range(len(bands)):
+        if bands[j] == '':
+            gridfile=os.environ['GRID_DIR']+"/grids/"+grids[0]+'.dat'
+        else:
+            gridfile=os.environ['GRID_DIR']+"/grids/"+grids[0]+'-'+bands[j]+'.dat'
+
+        #read grid wavelength array
+        x1=lambda_synth(gridfile)
+        #read DESI data, select targets, and resample
+        (x,y,ivar,r)=readspec(datafile,bands[j])
+        ey=sqrt(divide(1.,ivar,where=(ivar != 0.)))
+        ey[where(ivar == 0.)]=max(y)*1e3
+        nspec, freq = y.shape
+        #print('nspec=',nspec)
+        #print('n(process_target)=',process_target.nonzero()[0].size)
+        y2=zeros((npass,len(x1)))
+        ey2=zeros((npass,len(x1)))
+        k2=0
+        #print('nspec,len(z),npass,len(x1)=',nspec,len(z),npass,len(x1))
+        for k in range(nspec):
+            if process_target[k]:
+                y2[k2,:]=interp(x1,x*(1.-z[targetid[k]]),y[k,:])
+                ey2[k2,:]=interp(x1,x*(1-z[targetid[k]]),ey[k,:])
+                k2=k2+1
+
+        if (j==0):
+            xx=x1
+            yy=y2
+            eyy=ey2
+        else:
+            xx=concatenate((xx,x1))
+            yy=concatenate((yy,y2),axis=1)
+            eyy=concatenate((eyy,ey2),axis=1)
+
+        savetxt(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'-'+bands[j]+'.wav',x1,fmt='%14.5e')
+
+    savetxt(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'.wav',xx,fmt='%14.5e')
+    fmp = tbl.Table(fibermap.data) [process_target]
+    hdu0 = fits.BinTableHDU(fmp)
+    hdu0.writeto(os.path.join(out_script_path,sdir,pixel,pixel)+suffix+'.fmp.fits',overwrite=True)
+    write_ferre_input(out_script_path,pixel,ids,par,yy,eyy,path=os.path.join(sdir,pixel),suffix=suffix)
+
+    #write slurm scripts
+    n_fiber=np.sum(process_target)
+    write_slurm(sdir,pixel,out_path,n_fiber,script_path=out_script_path,ngrids=len(grids),nthreads=nthreads, suffix=suffix)
+
+    #loop over all grids
+    for k in range(len(grids)):
+        #make an array with the names of the synthfiles
+        synthfiles=[]
+        for j in range(len(bands)):
+            if bands[j] == '':
+                gridfile=os.environ['GRID_DIR']+"/grids/"+grids[k]+'.dat'
+            else:
+                gridfile=os.environ['GRID_DIR']+"/grids/"+grids[k]+'-'+bands[j]+'.dat'
+            synthfiles.append(gridfile)
+
+        #prepare ferre control file
+        nml=mknml(synthfiles,pixel+suffix,k,maxorder[k],nthreads=nthreads)
+        writenml(nml,nmlfile='input.nml'+suffix+'_'+str(k),path=os.path.join(out_script_path,sdir,pixel))
+        writenml(nml,path=os.path.join(out_script_path,sdir,pixel))
+	#print(k)
+	#print(nml)
 	
-	#run ferre
-	#ferrerun(path=os.path.join(sdir,pixel))
-	#opfmerge(pixel,path=os.path.join(sdir,pixel))
-	return None
+    #run ferre
+    #ferrerun(path=os.path.join(sdir,pixel))
+    #opfmerge(pixel,path=os.path.join(sdir,pixel))
+    return None
 
 #find pixels in 'root' directory (spectra-64)
 def getpixels(root):
@@ -1014,7 +1034,7 @@ if __name__ == "__main__":
 		required=False)
 		
 	parser.add_argument('--date',
-		help='the date which data will be processed',
+		help='the date which data is processing',
 		type=int,
 		default=None,
 		required=False)		
@@ -1071,5 +1091,3 @@ if __name__ == "__main__":
 	for pixel,sdir in zip(pixels,sdirs):
 		do(path,out_path,os.path.join(out_script_path,now),pixel,expid_range,sdir=sdir,nthreads=nthreads, rvpath=out_path,mwonly=mwonly)
     #run(pixel,path=os.path.join(sdir,pixel))
-
-
