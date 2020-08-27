@@ -69,7 +69,7 @@ def write_slurm(prefix,sdir,pixel,output_path,n_fiber,nthreads=1,script_path=Non
 
     # Calculating the required runtime. For 3000 fibers it takes about 280 mins. for 5D model with 8 threads
     # Each run request at least 20 min.
-    runtime=280.0*60.0*np.ceil(n_fiber/3000.0) # in second.
+    runtime=np.ceil(280.0*60.0*n_fiber/3000.0) # in second.
     rt_5m=np.ceil(runtime/(5.0*60.0))
     rt_hr=int(rt_5m//12)
     if(rt_hr != 0):
